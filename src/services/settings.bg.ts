@@ -10,6 +10,7 @@ import * as Styles from 'src/services/styles.bg'
 import * as SnapshotsBg from 'src/services/snapshots.bg'
 import * as IPC from 'src/services/ipc'
 import * as Logs from 'src/services/logs'
+import * as WebReq from 'src/services/web-req.bg'
 
 import * as Settings from 'src/services/settings'
 export * from 'src/services/settings'
@@ -72,6 +73,7 @@ export function updateSettingsBg(settings?: SettingsState | null): void {
   const omniMoveToPanelPrefix = prev.omniMoveToPanelPrefix !== next.omniMoveToPanelPrefix
   const omniMoveToGroup = prev.omniMoveToGroup !== next.omniMoveToGroup
   const omniMoveToGroupPrefix = prev.omniMoveToGroupPrefix !== next.omniMoveToGroupPrefix
+  const newTabCtxReopen = prev.newTabCtxReopen !== next.newTabCtxReopen
 
   Utils.updateObject(Settings.state, settings, Settings.state)
 
@@ -96,6 +98,7 @@ export function updateSettingsBg(settings?: SettingsState | null): void {
   if (snapIntervalChanged || snapIntervalUnitChanged) SnapshotsBg.scheduleSnapshots()
 
   if (colorSchemeChanged) Styles.load()
+  if (newTabCtxReopen) WebReq.updateReqHandlers()
 
   if (
     omniReopenInCtr ||

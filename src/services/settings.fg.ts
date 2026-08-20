@@ -9,7 +9,6 @@ import * as Bookmarks from 'src/services/bookmarks.fg'
 import * as Menu from 'src/services/menu.fg'
 import * as Tabs from 'src/services/tabs.fg'
 import * as Preview from 'src/services/tabs.fg.preview'
-import { updateWebReqHandlers } from './web-req.fg'
 import * as Search from 'src/services/search.fg'
 import * as Sync from 'src/services/sync.fg'
 import * as Logs from 'src/services/logs'
@@ -121,7 +120,6 @@ export function updateSettings(settings?: SettingsState | null): void {
     prev.navTabsPanelMidClickAction !== next.navTabsPanelMidClickAction
   const navBookmarksPanelMidClickAction =
     prev.navBookmarksPanelMidClickAction !== next.navBookmarksPanelMidClickAction
-  const newTabCtxReopen = prev.newTabCtxReopen !== next.newTabCtxReopen
   const previewTabs = prev.previewTabs !== next.previewTabs
   const previewTabsMode = prev.previewTabsMode !== next.previewTabsMode
   const previewTabsModeFallback =
@@ -138,8 +136,6 @@ export function updateSettings(settings?: SettingsState | null): void {
   Utils.updateObject(Settings.state, settings, Settings.state)
 
   Settings.updPrecalcSettings()
-
-  if (Info.isSidebar && newTabCtxReopen) updateWebReqHandlers()
 
   if (Info.isSidebar && tabsUnreadMark && !next.tabsUnreadMark) {
     Tabs.list.forEach(t => (t.reactive.unread = t.unread = false))

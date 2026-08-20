@@ -1,5 +1,5 @@
 import * as T from 'src/types'
-import { InstanceType } from 'src/enums'
+import { InstanceType, PanelType } from 'src/enums'
 import * as D from 'src/defaults'
 import * as Utils from 'src/utils'
 import * as Windows from 'src/services/windows.bg'
@@ -13,6 +13,7 @@ import * as Settings from 'src/services/settings'
 import * as Logs from 'src/services/logs'
 import * as Styles from 'src/services/styles.bg'
 import * as Omnibox from 'src/services/omnibox.bg'
+import * as Sidebar from 'src/services/sidebar.bg'
 import { DetachedTabsInfo } from 'src/services/tabs.fg.move'
 import { translate } from 'src/dict'
 
@@ -24,6 +25,14 @@ export let cacheByWin: Record<ID, T.TabCache[]> = {}
 export let deferredEventHandling: (() => void)[] = []
 
 let _tabsDataCache: T.TabCache[][] | undefined
+
+interface PendingContainerRoutedTab {
+  windowId: ID
+  cookieStoreId: string
+  index: number
+}
+
+const pendingContainerRoutedTabs: PendingContainerRoutedTab[] = []
 
 /**
  * Load tabs
@@ -203,6 +212,15 @@ function onTabCreated(nativeTab: browser.tabs.Tab): void {
   }
 
   const tab = mutateNativeTabToSideberyTab(nativeTab)
+  const routedTabIndex = pendingContainerRoutedTabs.findIndex(pending => {
+    return (
+      pending.windowId === tab.windowId &&
+      pending.cookieStoreId === tab.cookieStoreId &&
+      pending.index === tab.index
+    )
+  })
+  const isContainerRoutingTarget = routedTabIndex !== -1
+  if (isContainerRoutingTarget) pendingContainerRoutedTabs.splice(routedTabIndex, 1)
 
   tab.initialNavigationPending = true
   tab.internal = tab.url.startsWith(D.ADDON_HOST)
@@ -214,6 +232,21 @@ function onTabCreated(nativeTab: browser.tabs.Tab): void {
   if (parentTab && parentTab.preventAutoReopening) tab.preventAutoReopening = true
 
   const tabWindow = Windows.byId.get(tab.windowId)
+  const parentPanelId = parentTab?.panelId ?? D.NOID
+  const panelId = Sidebar.panelConfById[parentPanelId]
+    ? parentPanelId
+    : (tabWindow?.activePanelId ?? D.NOID)
+  const panel = Sidebar.panelConfById[panelId]
+  if (
+    !isContainerRoutingTarget &&
+    Settings.state.newTabCtxReopen &&
+    tab.cookieStoreId === D.DEFAULT_CONTAINER_ID &&
+    panel?.type === PanelType.tabs &&
+    Containers.reactive.byId[panel.newTabCtx]
+  ) {
+    tab.reopenInContainer = panel.newTabCtx
+  }
+
   if (!tabWindow) {
     const win: T.BgWindow = {
       id: tab.windowId,
@@ -842,15 +875,24 @@ export async function reopenTab(
 
   if (index === undefined) index = tab.index
 
-  await browser.tabs.create({
-    windowId: tab.windowId,
-    url: Utils.sanitizeUrl(url),
-    cookieStoreId,
-    active: tab.active,
-    index,
-    pinned: tab.pinned,
-    openerTabId: options.preserveSource ? tab.id : undefined,
-  })
+  const targetContainerId = cookieStoreId ?? D.DEFAULT_CONTAINER_ID
+  const pendingTab = { windowId: tab.windowId, cookieStoreId: targetContainerId, index }
+  pendingContainerRoutedTabs.push(pendingTab)
+  try {
+    await browser.tabs.create({
+      windowId: tab.windowId,
+      url: Utils.sanitizeUrl(url),
+      cookieStoreId,
+      active: tab.active,
+      index,
+      pinned: tab.pinned,
+      openerTabId: options.preserveSource ? tab.id : undefined,
+    })
+  } catch (err) {
+    const pendingIndex = pendingContainerRoutedTabs.indexOf(pendingTab)
+    if (pendingIndex !== -1) pendingContainerRoutedTabs.splice(pendingIndex, 1)
+    throw err
+  }
   if (!options.preserveSource) await browser.tabs.remove(tab.id)
 }
 

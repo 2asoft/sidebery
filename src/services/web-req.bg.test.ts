@@ -180,6 +180,24 @@ describe('container request routing', () => {
     })
   })
 
+  test('cancels a mismatched request after creating its replacement', async () => {
+    const sourceTab = tab({
+      cookieStoreId: defaultContainer,
+      initialNavigationPending: true,
+      reopenInContainer: containerA,
+    })
+    tabs.byId[sourceTab.id] = sourceTab
+
+    const response = await containerRequestHandler(
+      request({ cookieStoreId: defaultContainer, url: urls[defaultContainer] })
+    )
+
+    expect(tabs.reopenTab).toHaveBeenCalledWith(sourceTab, urls[defaultContainer], containerA, {
+      preserveSource: false,
+    })
+    expect(response).toEqual({ cancel: true })
+  })
+
   test('replaces a new source tab when rerouting its initial request', () => {
     const action = getContainerRequestAction(
       { cookieStoreId: containerA, method: 'GET', url: urls[containerB] },
@@ -248,6 +266,25 @@ describe('container request routing', () => {
     })
   })
 
+  test('uses the panel container for an unmatched new-tab request', () => {
+    const action = getContainerRequestAction(
+      { cookieStoreId: defaultContainer, method: 'GET', url: urls[defaultContainer] },
+      tab({
+        cookieStoreId: defaultContainer,
+        initialNavigationPending: true,
+        reopenInContainer: containerA,
+      }),
+      includeRules,
+      {}
+    )
+
+    expect(action).toEqual({
+      type: 'reroute',
+      targetContainerId: containerA,
+      preserveSource: false,
+    })
+  })
+
   test('does not reroute private requests', async () => {
     const response = await containerRequestHandler(request({ incognito: true }))
 
@@ -256,7 +293,11 @@ describe('container request routing', () => {
   })
 
   test('honors a temporary manual-routing override', async () => {
-    const sourceTab = tab({ cookieStoreId: containerB, initialNavigationPending: true })
+    const sourceTab = tab({
+      cookieStoreId: containerB,
+      initialNavigationPending: true,
+      reopenInContainer: containerA,
+    })
     tabs.byId[sourceTab.id] = sourceTab
     disableAutoReopening(containerB, 1000)
 

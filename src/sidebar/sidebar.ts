@@ -25,7 +25,6 @@ import * as Info from 'src/services/info'
 import * as Snapshots from 'src/services/snapshots.fg'
 import * as Sync from 'src/services/sync.fg'
 import * as Keybindings from 'src/services/keybindings.fg'
-import * as WebReq from 'src/services/web-req.fg'
 import SidebarRoot from './sidebar.vue'
 
 async function main(): Promise<void> {
@@ -137,8 +136,6 @@ async function main(): Promise<void> {
   if (Sidebar.hasBookmarks && initBookmarks) Bookmarks.load()
   if (Sidebar.hasHistory && initHistory) History.load()
   if (Sidebar.hasSync && initSync) Sync.load()
-
-  WebReq.updateWebReqHandlers()
 
   Menu.loadCtxMenu()
   Menu.setupListeners()

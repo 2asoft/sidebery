@@ -503,18 +503,6 @@ async function onTabCreated(nativeTab: NativeTab, attached?: boolean) {
     tab.reactive.customColor = tab.customColor = reopenedTabInfo.customColor
   }
 
-  // Check if tab should be reopened in different container
-  if (
-    !attached &&
-    !reopenedTabInfo &&
-    tab.cookieStoreId === D.DEFAULT_CONTAINER_ID &&
-    panel &&
-    panel.newTabCtx !== 'none'
-  ) {
-    const container = Containers.reactive.byId[panel.newTabCtx]
-    if (container) tab.reopenInContainer = container.id
-  }
-
   // Put new tab in state
   Tabs.byId[tab.id] = tab
   Tabs.list.splice(index, 0, tab)

@@ -34,7 +34,6 @@ export interface Tab extends NativeTab {
   internal?: boolean
   isGroup: boolean
   reopening?: { id: ID }
-  reopenInContainer?: string
   customTitle?: string
   customColor?: string
   moving?: boolean
@@ -106,6 +105,7 @@ export interface BgTab extends NativeTab {
   preventAutoReopening?: boolean
   reloadOnActivation?: boolean
   initialNavigationPending?: boolean
+  reopenInContainer?: string
 }
 
 export interface InlineTabData {

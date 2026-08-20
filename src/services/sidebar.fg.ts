@@ -21,7 +21,6 @@ import * as Info from 'src/services/info'
 import * as Permissions from 'src/services/permissions.fg'
 import * as Notifications from 'src/services/notifications.fg'
 import * as Popups from 'src/services/popups.fg'
-import { turnOffBeforeRequestHandler, turnOnBeforeRequestHandler } from 'src/services/web-req.fg'
 import * as SidebarConf from 'src/services/sidebar-config'
 import * as Sync from 'src/services/sync.fg'
 
@@ -1022,7 +1021,6 @@ async function updateSidebar(newConfig?: T.SidebarConfig): Promise<void> {
   let tabsSaveNeeded = false
   let tabsPanelId: ID | undefined
   let existedPanelId: ID | undefined
-  let webReqHandlerNeeded = false
 
   // Loop over the new panels
   for (const newPanelConfig of newPanelConfigs) {
@@ -1059,11 +1057,6 @@ async function updateSidebar(newConfig?: T.SidebarConfig): Promise<void> {
     if (Utils.isTabsPanel(panel)) {
       const newTabContainer = panel.newTabCtx ? Containers.reactive.byId[panel.newTabCtx] : null
       if (panel.newTabCtx !== D.DEFAULT_CONTAINER_ID && !newTabContainer) panel.newTabCtx = 'none'
-
-      if (!webReqHandlerNeeded && Settings.state.newTabCtxReopen && panel.newTabCtx !== 'none') {
-        const container = Containers.reactive.byId[panel.newTabCtx]
-        if (container) webReqHandlerNeeded = true
-      }
     }
 
     // Save first panel and first tabs panel
@@ -1197,10 +1190,6 @@ async function updateSidebar(newConfig?: T.SidebarConfig): Promise<void> {
       if (firstPanel) activatePanel(firstPanel.id)
     }
   }
-
-  // On or off web request handler
-  if (webReqHandlerNeeded) turnOnBeforeRequestHandler()
-  else turnOffBeforeRequestHandler()
 }
 
 export function activatePanel(panelId: ID, loadPanels = true, keepSearching?: boolean): void {

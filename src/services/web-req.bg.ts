@@ -196,7 +196,7 @@ export function updateReqHandlers(): void {
     }
   }
 
-  if (hasIncRules || hasExcRules) {
+  if (hasIncRules || hasExcRules || Settings.state.newTabCtxReopen) {
     turnOnContainerRequestHandler()
   } else {
     turnOffContainerRequestHandler()
@@ -304,7 +304,10 @@ export function getContainerRequestAction(
 ): ContainerRequestAction {
   if (info.method !== 'GET') return { type: 'allow' }
 
-  const route = getContainerRequestRoute(info.cookieStoreId, info.url, includes, excludes)
+  let route = getContainerRequestRoute(info.cookieStoreId, info.url, includes, excludes)
+  if (!route && tab.reopenInContainer && tab.reopenInContainer !== info.cookieStoreId) {
+    route = { type: 'container', containerId: tab.reopenInContainer }
+  }
   if (!route) return { type: 'allow' }
 
   return {
@@ -334,6 +337,7 @@ export async function containerRequestHandler(
   if (!tab || tab.preventAutoReopening) return
 
   const action = getContainerRequestAction(info, tab)
+  tab.reopenInContainer = undefined
   if (action.type === 'allow') return
 
   handledReqId = info.requestId
