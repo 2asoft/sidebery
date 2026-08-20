@@ -23,11 +23,6 @@ describe('container request routing', () => {
     { ctx: containerA, value: /^https:\/\/site1\.com(?:\/|$)/ },
     { ctx: containerB, value: /^https:\/\/site2\.com(?:\/|$)/ },
   ]
-  const excludeRules = {
-    [containerA]: [/^https:\/\/example\.com(?:\/|$)/],
-    [containerB]: [/^https:\/\/example\.com(?:\/|$)/],
-  }
-
   test.each([
     [defaultContainer, defaultContainer, undefined],
     [defaultContainer, containerA, containerA],
@@ -39,17 +34,17 @@ describe('container request routing', () => {
     [containerB, containerA, containerA],
     [containerB, containerB, undefined],
   ])('routes %s to %s through %s', (source, target, expectedContainer) => {
-    const route = getContainerRequestRoute(source, urls[target], includeRules, excludeRules)
+    const route = getContainerRequestRoute(source, urls[target], includeRules, {})
 
     if (expectedContainer === undefined) expect(route).toBeUndefined()
     else if (expectedContainer === defaultContainer) expect(route).toEqual({ type: 'default' })
     else expect(route).toEqual({ type: 'container', containerId: expectedContainer })
   })
 
-  test('leaves an unmatched URL in its source container without an exclude rule', () => {
+  test('routes an unmatched URL out of a container with include rules', () => {
     const route = getContainerRequestRoute(containerA, urls[defaultContainer], includeRules, {})
 
-    expect(route).toBeUndefined()
+    expect(route).toEqual({ type: 'default' })
   })
 
   test('keeps a matching source when include rules overlap', () => {

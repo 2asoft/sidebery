@@ -222,10 +222,12 @@ export function getContainerRequestRoute(
   excludes: Record<ID, (RegExp | string)[]> = excludeHostsRules
 ): ContainerRequestRoute | undefined {
   let includedUrl = false
+  let sourceHasIncludeRule = false
   let sourceMatchesIncludeRule = false
   let matchedContainerId: string | undefined
 
   for (const rule of includes) {
+    if (sourceContainerId === rule.ctx) sourceHasIncludeRule = true
     if (!ruleMatches(rule.value, url)) continue
 
     includedUrl = true
@@ -238,7 +240,9 @@ export function getContainerRequestRoute(
 
   if (!includedUrl) {
     const sourceExcludes = excludes[sourceContainerId]
-    if (sourceExcludes?.some(rule => ruleMatches(rule, url))) return { type: 'default' }
+    if (sourceHasIncludeRule || sourceExcludes?.some(rule => ruleMatches(rule, url))) {
+      return { type: 'default' }
+    }
   }
 
   return
