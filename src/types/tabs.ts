@@ -105,6 +105,7 @@ export interface BgTab extends NativeTab {
   proxified?: boolean
   preventAutoReopening?: boolean
   reloadOnActivation?: boolean
+  initialNavigationPending?: boolean
 }
 
 export interface InlineTabData {

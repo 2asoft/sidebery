@@ -168,6 +168,19 @@ function mutateNativeTabToSideberyTab(nativeTab: T.NativeTab): T.BgTab {
   return tab
 }
 
+export function isEmptyTabUrl(url: string): boolean {
+  return url === '' || url.startsWith('about:blank') || url.startsWith('about:newtab')
+}
+
+export function getInitialNavigationPending(
+  current: boolean | undefined,
+  url: string,
+  status: string | undefined
+): boolean | undefined {
+  if (status === 'complete' && !isEmptyTabUrl(url)) return false
+  return current
+}
+
 export function setupListeners(): void {
   browser.tabs.onCreated.addListener(onTabCreated)
   browser.tabs.onRemoved.addListener(onTabRemoved)
@@ -191,6 +204,7 @@ function onTabCreated(nativeTab: browser.tabs.Tab): void {
 
   const tab = mutateNativeTabToSideberyTab(nativeTab)
 
+  tab.initialNavigationPending = true
   tab.internal = tab.url.startsWith(D.ADDON_HOST)
   tab.isGroup = tab.internal && Utils.isGroupUrl(tab.url)
 
@@ -343,6 +357,11 @@ function onTabUpdated(tabId: ID, change: browser.tabs.ChangeInfo): void {
   }
 
   Object.assign(tab, change)
+  tab.initialNavigationPending = getInitialNavigationPending(
+    tab.initialNavigationPending,
+    tab.url,
+    change.status
+  )
 
   if (WebReq.containersProxies[tab.cookieStoreId]) {
     tab.proxified = true
