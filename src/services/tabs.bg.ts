@@ -811,17 +811,33 @@ export async function openTabs(items: T.ItemInfo[], dst: T.DstPlaceInfo) {
   }
 }
 
-export async function reopenTab(tab: T.BgTab, url: string, cookieStoreId?: string) {
+interface ReopenTabOptions {
+  preserveSource?: boolean
+}
+
+export async function reopenTab(
+  tab: T.BgTab,
+  url: string,
+  cookieStoreId?: string,
+  options: ReopenTabOptions = {}
+) {
   let index: number | undefined
-  const checkingIfSidebarOpen = browser.sidebarAction.isOpen({ windowId: tab.windowId }).then(v => {
-    if (!v) throw false
-  })
-  const receivingIndex = IPC.sidebar(tab.windowId, 'handleReopening', tab.id, cookieStoreId)
-  try {
-    const [i] = await Promise.all([receivingIndex, checkingIfSidebarOpen])
-    index = i
-  } catch {
-    /* itsokay */
+
+  if (options.preserveSource) {
+    index = tab.index + 1
+  } else {
+    const checkingIfSidebarOpen = browser.sidebarAction
+      .isOpen({ windowId: tab.windowId })
+      .then(v => {
+        if (!v) throw false
+      })
+    const receivingIndex = IPC.sidebar(tab.windowId, 'handleReopening', tab.id, cookieStoreId)
+    try {
+      const [i] = await Promise.all([receivingIndex, checkingIfSidebarOpen])
+      index = i
+    } catch {
+      /* itsokay */
+    }
   }
 
   if (index === undefined) index = tab.index
@@ -833,8 +849,10 @@ export async function reopenTab(tab: T.BgTab, url: string, cookieStoreId?: strin
     active: tab.active,
     index,
     pinned: tab.pinned,
+    openerTabId: options.preserveSource ? tab.id : undefined,
   })
-  await browser.tabs.remove(tab.id)
+  if (options.preserveSource) await browser.tabs.reload(tab.id)
+  else await browser.tabs.remove(tab.id)
 }
 
 export function getActiveTabInLastFocusedWindow() {

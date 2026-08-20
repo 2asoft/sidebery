@@ -108,6 +108,7 @@ export interface SettingsState {
   tabsUrlInTooltip: (typeof SETTINGS_OPTIONS.tabsUrlInTooltip)[number]
   tabsContainerInTooltip: boolean
   newTabCtxReopen: boolean
+  containerReopenPreserveSource: boolean
   tabWarmupOnHover: boolean
   tabSwitchDelay: number
   forceDiscard: boolean

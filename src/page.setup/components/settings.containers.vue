@@ -8,6 +8,12 @@ section(ref="el")
     dbg="containersSortByName"
     :default="DEFAULT_SETTINGS.containersSortByName"
     @update:value="Settings.saveDebounced(150)")
+  ToggleField(
+    label="settings.containers_preserve_source_tab"
+    v-model:value="Settings.state.containerReopenPreserveSource"
+    dbg="containerReopenPreserveSource"
+    :default="DEFAULT_SETTINGS.containerReopenPreserveSource"
+    @update:value="Settings.saveDebounced(150)")
   .sub-fields
     .card(
       v-for="(container, id) in Containers.sortContainers(Object.values(Containers.reactive.byId))"

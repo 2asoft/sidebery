@@ -5,6 +5,7 @@ import * as Containers from 'src/services/containers'
 import * as Tabs from 'src/services/tabs.bg'
 import * as IPC from 'src/services/ipc.bg'
 import * as Logs from 'src/services/logs'
+import * as Settings from 'src/services/settings'
 
 type optBlockingResponse = browser.webRequest.BlockingResponse | void
 
@@ -14,6 +15,8 @@ export interface IncludeRule {
 }
 
 export type ContainerRequestRoute = { type: 'container'; containerId: string } | { type: 'default' }
+export type ContainerRequestAction =
+  { type: 'allow' } | { type: 'reroute'; targetContainerId?: string; preserveSource: boolean }
 
 export let containersProxies: Record<string, browser.proxy.ProxyInfo> = {}
 
@@ -248,6 +251,27 @@ export function getContainerRequestRoute(
   return
 }
 
+export function getContainerRequestAction(
+  info: { cookieStoreId: ID; method: string; url: string },
+  tab: BgTab,
+  includes: IncludeRule[] = includeHostsRules,
+  excludes: Record<ID, (RegExp | string)[]> = excludeHostsRules
+): ContainerRequestAction {
+  if (info.method !== 'GET') return { type: 'allow' }
+
+  const route = getContainerRequestRoute(info.cookieStoreId, info.url, includes, excludes)
+  if (!route) return { type: 'allow' }
+
+  return {
+    type: 'reroute',
+    targetContainerId: route.type === 'container' ? route.containerId : undefined,
+    preserveSource:
+      Settings.state.containerReopenPreserveSource &&
+      tab.initialNavigationPending !== true &&
+      !Tabs.isEmptyTabUrl(tab.url),
+  }
+}
+
 ///
 /// Proxy
 ///
@@ -256,7 +280,7 @@ export function getContainerRequestRoute(
  * Handle requests before sending and define proxy
  * config for them.
  */
-function proxyReqHandler(info: browser.proxy.RequestDetails): browser.proxy.ProxyInfoResult {
+export function proxyReqHandler(info: browser.proxy.RequestDetails): browser.proxy.ProxyInfoResult {
   if (!Tabs.byId) return
 
   const tab = Tabs.byId[info.tabId]
@@ -282,10 +306,11 @@ function proxyReqHandler(info: browser.proxy.RequestDetails): browser.proxy.Prox
     (!disableReopeningForContainer || disableReopeningForContainer !== info.cookieStoreId)
   ) {
     handledReqId = info.requestId
-    const route = getContainerRequestRoute(info.cookieStoreId, info.url)
-    if (route) {
-      const targetContainerId = route.type === 'container' ? route.containerId : undefined
-      return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, targetContainerId)
+    const action = getContainerRequestAction(info, tab)
+    if (action.type === 'reroute') {
+      return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, action.targetContainerId, {
+        preserveSource: action.preserveSource,
+      })
     }
   }
 

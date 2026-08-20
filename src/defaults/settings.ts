@@ -108,6 +108,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   tabsUrlInTooltip: 'full',
   tabsContainerInTooltip: true,
   newTabCtxReopen: false,
+  containerReopenPreserveSource: false,
   tabWarmupOnHover: true,
   tabSwitchDelay: 0,
   forceDiscard: true,

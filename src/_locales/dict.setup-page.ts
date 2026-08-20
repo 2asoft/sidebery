@@ -2178,6 +2178,9 @@ Vous pouvez également définir des préfixes pour chaque type de commande pour 
     zh_TW: '依名稱排序容器',
     ja: '名前でコンテナをソート',
   },
+  'settings.containers_preserve_source_tab': {
+    en: 'Preserve source tab when a URL opens in another container',
+  },
   'settings.container_remove_confirm': {
     en: name => `Are you sure you want to delete "${name}" container?`,
     de: name => `Möchten Sie die Umgebung "${name}" wirklich löschen?`,
