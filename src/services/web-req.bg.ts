@@ -8,10 +8,12 @@ import * as Logs from 'src/services/logs'
 
 type optBlockingResponse = browser.webRequest.BlockingResponse | void
 
-interface IncludeRule {
+export interface IncludeRule {
   ctx: string
   value: RegExp | string
 }
+
+export type ContainerRequestRoute = { type: 'container'; containerId: string } | { type: 'default' }
 
 export let containersProxies: Record<string, browser.proxy.ProxyInfo> = {}
 
@@ -22,7 +24,6 @@ let includeHostsRules: IncludeRule[] = []
 let excludeHostsRules: Record<ID, (RegExp | string)[]> = {}
 let proxyAuthCredentials: Record<string, browser.webRequest.AuthCredentials> = {}
 const pendingProxyAuthRequests: Set<string> = new Set()
-const incHistory: Record<ID, string | null> = {}
 let ipCheckCtx: ID | undefined
 let userAgents: Record<ID, string> = {}
 
@@ -209,6 +210,40 @@ export function updateReqHandlersDebounced(delay = 500): void {
   updateReqHandlersTimeout = setTimeout(() => updateReqHandlers(), delay)
 }
 
+function ruleMatches(value: RegExp | string, url: string): boolean {
+  if (Utils.isRegExp(value)) return (value as RegExp).test(url)
+  return url.includes(value as string)
+}
+
+export function getContainerRequestRoute(
+  sourceContainerId: ID,
+  url: string,
+  includes: IncludeRule[] = includeHostsRules,
+  excludes: Record<ID, (RegExp | string)[]> = excludeHostsRules
+): ContainerRequestRoute | undefined {
+  let includedUrl = false
+  let sourceMatchesIncludeRule = false
+  let matchedContainerId: string | undefined
+
+  for (const rule of includes) {
+    if (!ruleMatches(rule.value, url)) continue
+
+    includedUrl = true
+    if (sourceContainerId === rule.ctx) sourceMatchesIncludeRule = true
+    else if (!matchedContainerId) matchedContainerId = rule.ctx
+  }
+
+  if (sourceMatchesIncludeRule) return
+  if (matchedContainerId) return { type: 'container', containerId: matchedContainerId }
+
+  if (!includedUrl) {
+    const sourceExcludes = excludes[sourceContainerId]
+    if (sourceExcludes?.some(rule => ruleMatches(rule, url))) return { type: 'default' }
+  }
+
+  return
+}
+
 ///
 /// Proxy
 ///
@@ -243,39 +278,10 @@ function proxyReqHandler(info: browser.proxy.RequestDetails): browser.proxy.Prox
     (!disableReopeningForContainer || disableReopeningForContainer !== info.cookieStoreId)
   ) {
     handledReqId = info.requestId
-    let includedUrl
-
-    // Include rules
-    for (const rule of includeHostsRules) {
-      let ok
-      if (Utils.isRegExp(rule.value)) ok = (rule.value as RegExp).test(info.url)
-      else ok = info.url.indexOf(rule.value as string) !== -1
-
-      if (!includedUrl) includedUrl = ok
-
-      if (ok && info.cookieStoreId !== rule.ctx) {
-        if (incHistory[info.cookieStoreId] === info.url) {
-          incHistory[info.cookieStoreId] = null
-          break
-        }
-
-        incHistory[rule.ctx] = info.url
-        return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, rule.ctx)
-      }
-    }
-
-    // Exclude rules
-    if (!includedUrl && excludeHostsRules[info.cookieStoreId]) {
-      for (const rule of excludeHostsRules[info.cookieStoreId]) {
-        let ok
-        if (Utils.isRegExp(rule)) ok = (rule as RegExp).test(info.url)
-        else ok = info.url.indexOf(rule as string) !== -1
-
-        if (ok) {
-          incHistory['firefox-default'] = info.url
-          return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url)
-        }
-      }
+    const route = getContainerRequestRoute(info.cookieStoreId, info.url)
+    if (route) {
+      const targetContainerId = route.type === 'container' ? route.containerId : undefined
+      return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, targetContainerId)
     }
   }
 
