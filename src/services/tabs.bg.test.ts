@@ -61,7 +61,7 @@ describe('reopenTab', () => {
       pinned: false,
       openerTabId: 1,
     })
-    expect(browser.tabs.reload).toHaveBeenCalledWith(1)
+    expect(browser.tabs.reload).not.toHaveBeenCalled()
     expect(browser.tabs.remove).not.toHaveBeenCalled()
   })
 })

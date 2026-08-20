@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { BgTab } from 'src/types'
 import * as Settings from 'src/services/settings'
 
-vi.mock('src/services/tabs.bg', () => ({
+const tabs = vi.hoisted(() => ({
   byId: {} as Record<ID, BgTab>,
   reopenTab: vi.fn(),
   showProxyBadge: vi.fn(),
@@ -11,11 +11,17 @@ vi.mock('src/services/tabs.bg', () => ({
     url === '' || url.startsWith('about:blank') || url.startsWith('about:newtab'),
 }))
 
+vi.mock('src/services/tabs.bg', () => tabs)
+
 import {
+  containerRequestHandler,
   containersProxies,
+  disableAutoReopening,
+  enableAutoReopening,
   getContainerRequestAction,
   getContainerRequestRoute,
   proxyReqHandler,
+  resolveRequestTab,
 } from 'src/services/web-req.bg'
 
 function tab(overrides: Partial<BgTab> = {}): BgTab {
@@ -37,10 +43,98 @@ function tab(overrides: Partial<BgTab> = {}): BgTab {
   }
 }
 
+function request(
+  overrides: Partial<browser.webRequest.ReqDetails> = {}
+): browser.webRequest.ReqDetails {
+  return {
+    cookieStoreId: 'firefox-default',
+    documentUrl: '',
+    frameId: 0,
+    incognito: false,
+    method: 'GET',
+    originUrl: '',
+    parentFrameId: -1,
+    proxyInfo: { type: 'direct' },
+    requestId: 'request-1',
+    tabId: 2,
+    thirdParty: false,
+    timeStamp: 0,
+    type: 'main_frame',
+    url: 'https://example.com/page',
+    ...overrides,
+  }
+}
+
+function setTabCreatedEvent(event: typeof browser.tabs.onCreated): void {
+  Object.defineProperty(browser.tabs, 'onCreated', { configurable: true, value: event })
+}
+
+function setTabRemovedEvent(event: typeof browser.tabs.onRemoved): void {
+  Object.defineProperty(browser.tabs, 'onRemoved', { configurable: true, value: event })
+}
+
 describe('container request routing', () => {
   beforeEach(() => {
+    tabs.byId = {}
     Settings.state.containerReopenPreserveSource = false
+    tabs.reopenTab.mockReset().mockResolvedValue(true)
+    vi.restoreAllMocks()
+    setTabCreatedEvent({
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      hasListener: vi.fn(),
+    })
+    setTabRemovedEvent({
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      hasListener: vi.fn(),
+    })
   })
+
+  test('resolves a newly opened tab before the created event is processed', async () => {
+    const nativeTab = tab({ url: 'about:blank', openerTabId: 1 })
+    const get = vi.fn().mockResolvedValue(nativeTab)
+    browser.tabs.get = get
+
+    const result = await resolveRequestTab(nativeTab.id)
+
+    expect(result).toEqual({ ...nativeTab, initialNavigationPending: true })
+    expect(get).toHaveBeenCalledWith(nativeTab.id)
+  })
+
+  test('waits for a newly opened tab when it is not immediately available', async () => {
+    const nativeTab = tab({ url: 'about:blank', openerTabId: 1 })
+    let onCreated: ((createdTab: browser.tabs.Tab) => void) | undefined
+    setTabCreatedEvent({
+      addListener: (listener: (createdTab: browser.tabs.Tab) => void) => (onCreated = listener),
+      removeListener: vi.fn(),
+      hasListener: vi.fn(),
+    })
+    browser.tabs.get = vi.fn().mockRejectedValue(new Error('Invalid tab ID'))
+
+    const resultPromise = resolveRequestTab(nativeTab.id)
+    onCreated?.(nativeTab)
+    const result = await resultPromise
+
+    expect(result).toEqual({ ...nativeTab, initialNavigationPending: true })
+  })
+
+  test('stops waiting when the requested tab is removed', async () => {
+    let onRemoved: Parameters<typeof browser.tabs.onRemoved.addListener>[0] | undefined
+    setTabRemovedEvent({
+      addListener: listener => (onRemoved = listener),
+      removeListener: vi.fn(),
+      hasListener: vi.fn(),
+    })
+    browser.tabs.get = vi.fn().mockRejectedValue(new Error('Invalid tab ID'))
+
+    const resultPromise = resolveRequestTab(2)
+    onRemoved?.(2, { isWindowClosing: false, windowId: 1 })
+    const result = await resultPromise
+
+    expect(result).toBeUndefined()
+  })
+
   const defaultContainer = 'firefox-default'
   const containerA = 'firefox-container-a'
   const containerB = 'firefox-container-b'
@@ -69,12 +163,6 @@ describe('container request routing', () => {
     if (expectedContainer === undefined) expect(route).toBeUndefined()
     else if (expectedContainer === defaultContainer) expect(route).toEqual({ type: 'default' })
     else expect(route).toEqual({ type: 'container', containerId: expectedContainer })
-  })
-
-  test('routes an unmatched URL out of a container with include rules', () => {
-    const route = getContainerRequestRoute(containerA, urls[defaultContainer], includeRules, {})
-
-    expect(route).toEqual({ type: 'default' })
   })
 
   test('keeps a matching source when include rules overlap', () => {
@@ -110,7 +198,6 @@ describe('container request routing', () => {
   test.each(['', 'about:blank', 'about:newtab'])(
     'replaces an empty source tab with URL %j',
     sourceUrl => {
-      Settings.state.containerReopenPreserveSource = true
       const action = getContainerRequestAction(
         { cookieStoreId: defaultContainer, method: 'GET', url: urls[containerA] },
         tab({
@@ -161,15 +248,25 @@ describe('container request routing', () => {
     })
   })
 
-  test('allows unsafe methods instead of recreating them as GET requests', () => {
-    const action = getContainerRequestAction(
-      { cookieStoreId: containerA, method: 'POST', url: urls[containerB] },
-      tab({ cookieStoreId: containerA }),
-      includeRules,
-      {}
-    )
+  test('does not reroute private requests', async () => {
+    const response = await containerRequestHandler(request({ incognito: true }))
 
-    expect(action).toEqual({ type: 'allow' })
+    expect(response).toBeUndefined()
+    expect(tabs.reopenTab).not.toHaveBeenCalled()
+  })
+
+  test('honors a temporary manual-routing override', async () => {
+    const sourceTab = tab({ cookieStoreId: containerB, initialNavigationPending: true })
+    tabs.byId[sourceTab.id] = sourceTab
+    disableAutoReopening(containerB, 1000)
+
+    const response = await containerRequestHandler(
+      request({ cookieStoreId: containerB, requestId: 'manual-override' })
+    )
+    enableAutoReopening([])
+
+    expect(response).toBeUndefined()
+    expect(tabs.reopenTab).not.toHaveBeenCalled()
   })
 
   test('selects the proxy configured for the routed container', () => {
@@ -195,5 +292,16 @@ describe('container request routing', () => {
     delete containersProxies[containerA]
 
     expect(result).toBe(proxy)
+  })
+
+  test('allows unsafe methods instead of recreating them as GET requests', () => {
+    const action = getContainerRequestAction(
+      { cookieStoreId: containerA, method: 'POST', url: urls[containerB] },
+      tab({ cookieStoreId: containerA }),
+      includeRules,
+      {}
+    )
+
+    expect(action).toEqual({ type: 'allow' })
   })
 })

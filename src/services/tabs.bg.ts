@@ -851,8 +851,7 @@ export async function reopenTab(
     pinned: tab.pinned,
     openerTabId: options.preserveSource ? tab.id : undefined,
   })
-  if (options.preserveSource) await browser.tabs.reload(tab.id)
-  else await browser.tabs.remove(tab.id)
+  if (!options.preserveSource) await browser.tabs.remove(tab.id)
 }
 
 export function getActiveTabInLastFocusedWindow() {

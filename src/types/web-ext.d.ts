@@ -841,7 +841,9 @@ declare namespace browser {
       url: string
     }
 
-    type Listener = (details: ReqDetails) => BlockingResponse | void
+    type Listener = (
+      details: ReqDetails
+    ) => BlockingResponse | void | Promise<BlockingResponse | void>
     type AuthListener = (details: AuthReqDetails) => BlockingResponse | void
     type ErrorListener = (details: ErrReqDetails) => void
 

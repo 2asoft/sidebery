@@ -82,10 +82,10 @@ void (async function main() {
   await Sidebar.load()
   Sidebar.setupListeners()
 
-  WebReq.updateReqHandlers()
-
   Tabs.setupListeners()
   await Tabs.load()
+
+  WebReq.updateReqHandlers()
 
   Permissions.load()
   Permissions.setupListeners()

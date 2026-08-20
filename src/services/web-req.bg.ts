@@ -196,8 +196,14 @@ export function updateReqHandlers(): void {
     }
   }
 
-  if (hasIncRules || hasExcRules || hasProxy) turnOnReqHandler()
-  else turnOffReqHandler()
+  if (hasIncRules || hasExcRules) {
+    turnOnContainerRequestHandler()
+  } else {
+    turnOffContainerRequestHandler()
+  }
+
+  if (hasProxy) turnOnProxyRequestHandler()
+  else turnOffProxyRequestHandler()
 
   if (hasAuthProxy) turnOnAuthHandler()
   else turnOffAuthHandler()
@@ -211,6 +217,44 @@ export function updateReqHandlersDebounced(delay = 500): void {
   Logs.info('WebReq.bg.updateReqHandlersDebounced')
   clearTimeout(updateReqHandlersTimeout)
   updateReqHandlersTimeout = setTimeout(() => updateReqHandlers(), delay)
+}
+
+///
+/// Container routing
+///
+
+export async function resolveRequestTab(tabId: ID): Promise<BgTab | undefined> {
+  const trackedTab = Tabs.byId[tabId]
+  if (trackedTab) return trackedTab
+
+  return new Promise(resolve => {
+    let finished = false
+
+    const finish = (tab: BgTab | undefined) => {
+      if (finished) return
+      finished = true
+      browser.tabs.onCreated.removeListener(onCreated)
+      browser.tabs.onRemoved.removeListener(onRemoved)
+      resolve(tab)
+    }
+    const onCreated = (tab: browser.tabs.Tab) => {
+      if (tab.id !== tabId) return
+      finish(Tabs.byId[tabId] ?? { ...tab, initialNavigationPending: true })
+    }
+    const onRemoved = (removedTabId: ID) => {
+      if (removedTabId === tabId) finish(undefined)
+    }
+
+    browser.tabs.onCreated.addListener(onCreated)
+    browser.tabs.onRemoved.addListener(onRemoved)
+    browser.tabs.get(tabId).then(
+      tab => finish(Tabs.byId[tabId] ?? { ...tab, initialNavigationPending: true }),
+      () => {
+        const createdTab = Tabs.byId[tabId]
+        if (createdTab) finish(createdTab)
+      }
+    )
+  })
 }
 
 function ruleMatches(value: RegExp | string, url: string): boolean {
@@ -230,11 +274,12 @@ export function getContainerRequestRoute(
   let matchedContainerId: string | undefined
 
   for (const rule of includes) {
-    if (sourceContainerId === rule.ctx) sourceHasIncludeRule = true
+    const sourceRule = sourceContainerId === rule.ctx
+    if (sourceRule) sourceHasIncludeRule = true
     if (!ruleMatches(rule.value, url)) continue
 
     includedUrl = true
-    if (sourceContainerId === rule.ctx) sourceMatchesIncludeRule = true
+    if (sourceRule) sourceMatchesIncludeRule = true
     else if (!matchedContainerId) matchedContainerId = rule.ctx
   }
 
@@ -252,7 +297,7 @@ export function getContainerRequestRoute(
 }
 
 export function getContainerRequestAction(
-  info: { cookieStoreId: ID; method: string; url: string },
+  info: Pick<browser.webRequest.ReqDetails, 'cookieStoreId' | 'method' | 'url'>,
   tab: BgTab,
   includes: IncludeRule[] = includeHostsRules,
   excludes: Record<ID, (RegExp | string)[]> = excludeHostsRules
@@ -272,17 +317,44 @@ export function getContainerRequestAction(
   }
 }
 
+export async function containerRequestHandler(
+  info: browser.webRequest.ReqDetails
+): Promise<browser.webRequest.BlockingResponse | void> {
+  if (
+    info.incognito ||
+    info.type !== 'main_frame' ||
+    info.tabId === browser.tabs.TAB_ID_NONE ||
+    handledReqId === info.requestId ||
+    (disableReopeningForContainer && disableReopeningForContainer === info.cookieStoreId)
+  ) {
+    return
+  }
+
+  const tab = await resolveRequestTab(info.tabId)
+  if (!tab || tab.preventAutoReopening) return
+
+  const action = getContainerRequestAction(info, tab)
+  if (action.type === 'allow') return
+
+  handledReqId = info.requestId
+  try {
+    await Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, action.targetContainerId, {
+      preserveSource: action.preserveSource,
+    })
+    return { cancel: true }
+  } catch (err) {
+    Logs.err('WebReq.containerRequestHandler: Cannot reroute tab:', err)
+    return
+  }
+}
+
 ///
 /// Proxy
 ///
 
-/**
- * Handle requests before sending and define proxy
- * config for them.
- */
-export function proxyReqHandler(info: browser.proxy.RequestDetails): browser.proxy.ProxyInfoResult {
-  if (!Tabs.byId) return
-
+export function proxyReqHandler(
+  info: browser.proxy.RequestDetails
+): browser.proxy.ProxyInfo | void {
   const tab = Tabs.byId[info.tabId]
 
   // Proxify requests for checking ip and other info
@@ -294,30 +366,7 @@ export function proxyReqHandler(info: browser.proxy.RequestDetails): browser.pro
     }
   }
 
-  // Check hosts rules, if the rule is matched
-  // return promise with the process of reopening new tab.
-  // This will block request from the original tab.
-  if (
-    !info.incognito &&
-    tab &&
-    !tab.preventAutoReopening &&
-    info.type === 'main_frame' &&
-    handledReqId !== info.requestId &&
-    (!disableReopeningForContainer || disableReopeningForContainer !== info.cookieStoreId)
-  ) {
-    handledReqId = info.requestId
-    const action = getContainerRequestAction(info, tab)
-    if (action.type === 'reroute') {
-      return Utils.GLOBAL_QUEUE.add(Tabs.reopenTab, tab, info.url, action.targetContainerId, {
-        preserveSource: action.preserveSource,
-      })
-    }
-  }
-
-  // Check proxy
-  if (containersProxies[info.cookieStoreId]) {
-    return containersProxies[info.cookieStoreId]
-  }
+  return containersProxies[info.cookieStoreId]
 }
 
 function proxyAuthReqHandler(
@@ -363,14 +412,35 @@ function cancelDebouncedProxyAuthErrorHandler(containerId: string) {
   clearTimeout(proxyAuthErrorHandlerTimeouts.get(containerId))
 }
 
-function turnOnReqHandler(): void {
+function turnOnContainerRequestHandler(): void {
+  if (!browser.webRequest) return
+  const eventTarget = browser.webRequest.onBeforeRequest
+  if (!eventTarget.hasListener(containerRequestHandler)) {
+    const filter: browser.webRequest.RequestFilter = {
+      urls: ['<all_urls>'],
+      incognito: false,
+      types: ['main_frame'],
+    }
+    eventTarget.addListener(containerRequestHandler, filter, ['blocking'])
+  }
+}
+
+function turnOffContainerRequestHandler(): void {
+  if (!browser.webRequest) return
+  const eventTarget = browser.webRequest.onBeforeRequest
+  if (eventTarget.hasListener(containerRequestHandler)) {
+    eventTarget.removeListener(containerRequestHandler)
+  }
+}
+
+function turnOnProxyRequestHandler(): void {
   if (!browser.proxy) return
   if (!browser.proxy.onRequest.hasListener(proxyReqHandler)) {
     browser.proxy.onRequest.addListener(proxyReqHandler, { urls: ['<all_urls>'] })
   }
 }
 
-function turnOffReqHandler(): void {
+function turnOffProxyRequestHandler(): void {
   if (!browser.proxy) return
   if (browser.proxy.onRequest.hasListener(proxyReqHandler)) {
     browser.proxy.onRequest.removeListener(proxyReqHandler)
